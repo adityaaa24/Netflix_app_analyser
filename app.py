@@ -1,189 +1,162 @@
 import streamlit as st
 import pandas as pd
+from pathlib import Path
 from transformers import pipeline
 
-# ----------------------------------
-# Page Configuration
-# ----------------------------------
+# -----------------------------
+# Page Config
+# -----------------------------
 st.set_page_config(
-    page_title="🎬 Movie Review Sentiment Analysis",
-    page_icon="🎥",
+    page_title="Netflix Review Sentiment Analysis",
+    page_icon="🎬",
     layout="wide"
 )
 
 st.title("🎬 Netflix Movie Review Sentiment Analysis")
-st.markdown("Analyze whether a movie review is **Positive** or **Negative** using AI.")
+st.write("Analyze movie reviews using a Hugging Face sentiment analysis model.")
 
-# ----------------------------------
+# -----------------------------
 # Load Dataset
-# ----------------------------------
+# -----------------------------
 @st.cache_data
 def load_data():
-    return pd.read_csv("netflix movie KGF 2.csv", sep=";")
+    csv_path = Path("netflix movie KGF 2.csv")
 
-df = load_data()
+    if not csv_path.exists():
+        st.error("Dataset file not found!")
+        st.stop()
 
-# ----------------------------------
+    return pd.read_csv(csv_path, sep=";")
+
+
+# -----------------------------
 # Load Model
-# ----------------------------------
+# -----------------------------
 @st.cache_resource
 def load_model():
     return pipeline(
-        "sentiment-analysis",
+        task="sentiment-analysis",
         model="distilbert-base-uncased-finetuned-sst-2-english"
     )
 
-classifier = load_model()
 
-# ----------------------------------
+# -----------------------------
+# Main
+# -----------------------------
+try:
+    df = load_data()
+    classifier = load_model()
+
+except Exception as e:
+    st.error(f"Application Error:\n\n{e}")
+    st.stop()
+
+# -----------------------------
 # Sidebar
-# ----------------------------------
-st.sidebar.header("Dataset Information")
-st.sidebar.write(f"Total Reviews: **{len(df)}**")
-st.sidebar.write(f"Columns: {', '.join(df.columns)}")
+# -----------------------------
+st.sidebar.title("Dataset")
 
-# ----------------------------------
-# User Input
-# ----------------------------------
+st.sidebar.metric("Rows", len(df))
+st.sidebar.metric("Columns", len(df.columns))
+
+# -----------------------------
+# Single Review Prediction
+# -----------------------------
+st.header("Analyze a Review")
+
 review = st.text_area(
-    "Enter a Movie Review",
-    placeholder="Example: The movie was fantastic with brilliant acting..."
+    "Enter Review",
+    height=150
 )
 
-if st.button("Analyze Review"):
+if st.button("Predict Sentiment"):
 
     if review.strip() == "":
         st.warning("Please enter a review.")
     else:
-        result = classifier(review)[0]
 
-        sentiment = result["label"]
-        confidence = result["score"] * 100
+        prediction = classifier(review)[0]
 
-        if sentiment == "POSITIVE":
+        label = prediction["label"]
+        score = prediction["score"] * 100
+
+        if label == "POSITIVE":
             st.success("😊 Positive Review")
         else:
             st.error("😞 Negative Review")
 
-        st.metric("Confidence", f"{confidence:.2f}%")
+        st.metric("Confidence", f"{score:.2f}%")
 
-# ----------------------------------
+# -----------------------------
 # Dataset Preview
-# ----------------------------------
-st.divider()
+# -----------------------------
+st.header("Dataset Preview")
 
-st.subheader("Dataset Preview")
 st.dataframe(df.head())
 
-if st.checkbox("Show Full Dataset"):
-    st.dataframe(df)
+# -----------------------------
+# Batch Prediction
+# -----------------------------
+st.header("Analyze Entire Dataset")
 
-# ----------------------------------
-# Batch Review Analysis
-# ----------------------------------
-st.divider()
-st.subheader("Batch Sentiment Analysis")
-
-review_column = st.selectbox(
+column = st.selectbox(
     "Select Review Column",
     df.columns
 )
 
 if st.button("Analyze Dataset"):
 
-    with st.spinner("Analyzing reviews..."):
+    with st.spinner("Analyzing..."):
 
-        sentiments = []
-        scores = []
+        results = []
 
-        for review in df[review_column].astype(str):
-            result = classifier(review)[0]
-            sentiments.append(result["label"])
-            scores.append(round(result["score"] * 100, 2))
+        for review in df[column].astype(str):
+
+            pred = classifier(review)[0]
+
+            results.append({
+                "Sentiment": pred["label"],
+                "Confidence": round(pred["score"] * 100, 2)
+            })
 
         result_df = df.copy()
-        result_df["Sentiment"] = sentiments
-        result_df["Confidence (%)"] = scores
 
-        st.success("Analysis Completed!")
+        result_df["Sentiment"] = [r["Sentiment"] for r in results]
+        result_df["Confidence (%)"] = [r["Confidence"] for r in results]
 
-        st.dataframe(result_df)
+    st.success("Analysis Complete!")
 
-        csv = result_df.to_csv(index=False).encode("utf-8")
+    st.dataframe(result_df)
 
-        st.download_button(
-            label="📥 Download Results",
-            data=csv,
-            file_name="sentiment_analysis_results.csv",
-            mime="text/csv"
-        )
-
-  # ----------------------------------
-# Sentiment Visualization
-# ----------------------------------
-if 'result_df' in locals():
-
-    st.divider()
-    st.subheader("Sentiment Distribution")
-
-    sentiment_counts = result_df["Sentiment"].value_counts()
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.bar_chart(sentiment_counts)
-
-    with col2:
-        st.write("### Sentiment Count")
-        st.write(sentiment_counts)
-
-    st.write("### Sentiment Percentage")
-
-    percentage = (
-        sentiment_counts / sentiment_counts.sum() * 100
-    ).round(2)
-
-    st.dataframe(
-        percentage.rename("Percentage (%)")
+    st.download_button(
+        "Download CSV",
+        result_df.to_csv(index=False),
+        "sentiment_results.csv",
+        "text/csv"
     )
 
-# ----------------------------------
-# About Project
-# ----------------------------------
-st.divider()
+    st.subheader("Sentiment Distribution")
 
-with st.expander("📖 About This Project"):
-    st.markdown("""
-### 🎬 Netflix Movie Review Sentiment Analysis
+    counts = result_df["Sentiment"].value_counts()
 
-This application uses a pre-trained **Hugging Face Transformer Model**
-(`distilbert-base-uncased-finetuned-sst-2-english`) to analyze movie reviews.
+    st.bar_chart(counts)
 
-### Features
-- ✅ Single Review Sentiment Prediction
-- ✅ Batch Dataset Analysis
-- ✅ Confidence Score
-- ✅ Download Results as CSV
-- ✅ Interactive Dashboard
+# -----------------------------
+# About
+# -----------------------------
+with st.expander("About Project"):
 
-### Tech Stack
+    st.write("""
+This application predicts whether a movie review is Positive or Negative using a pre-trained Hugging Face Transformer model.
+
+### Technologies Used
+
 - Python
 - Streamlit
-- Transformers (Hugging Face)
+- Transformers
 - Pandas
 - PyTorch
 """)
 
-# ----------------------------------
-# Footer
-# ----------------------------------
 st.markdown("---")
-st.markdown(
-    """
-    <div style='text-align:center; color:gray;'>
-        <h4>🎥 Netflix Movie Review Sentiment Analysis</h4>
-        <p>Built with ❤️ using Streamlit & Hugging Face Transformers</p>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+st.caption("Built using Streamlit and Hugging Face Transformers")
